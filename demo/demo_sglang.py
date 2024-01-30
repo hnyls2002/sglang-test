@@ -44,6 +44,7 @@ def main(args):
     sgl.set_default_backend(backend)
 
     # Run requests
+    time.sleep(3)
     tic = time.time()
     for name in names:
         state = character_gen.run(

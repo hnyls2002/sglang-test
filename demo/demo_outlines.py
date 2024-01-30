@@ -50,6 +50,7 @@ def main(args):
     url = f"{args.host}:{args.port}/generate"
     generate = partial(call_generate_outlines, url=url)
 
+    time.sleep(3)
     tic = time.time()
     for name in names:
         prompt = (
