@@ -18,16 +18,14 @@ character_regex = (
     + r"""        "core": "[\w\d\s]{1,16}",\n"""
     + r"""        "length": [0-9]{1,2}\.[0-9]{0,2}\n"""
     + r"""    \},\n"""
-    + r"""    "alive": "(Alive|Deceased)",\n"""
-    + r"""    "patronus": "[\w\d\s]{1,16}",\n"""
-    + r"""    "bogart": "[\w\d\s]{1,16}"\n"""
+    + r"""    "alive": "(Alive|Deceased)"\n"""
     + r"""\}"""
 )
 
 # fmt: off
 @sgl.function
 def character_gen(s, name):
-    s += name+ " is a character in Harry Potter. Please fill in the following information about him/her.\n"
+    s += name+ " is a character in Harry Potter.\nPlease fill in the following information about the character.\n"
     s += sgl.gen("json_output", max_tokens=256, regex=character_regex)
 # fmt: on
 
@@ -55,11 +53,15 @@ def main(args):
         for out in state.text_iter():
             print(out, end="", flush=True)
         print()
+        if name != names[-1]:
+            print("=" * 50)
 
     latency = time.time() - tic
 
     # Compute accuracy
-    print(f"Latency: {latency:.3f}")
+    print("=" * 20, end="")
+    print(f"\x1b[44mLatency: {latency:.3f}\x1b[0m", end="")
+    print("=" * 20)
 
 
 if __name__ == "__main__":
