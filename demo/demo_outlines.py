@@ -1,8 +1,9 @@
 import argparse
-import requests
+import json
 import time
 from functools import partial
 
+import requests
 from sglang.test.test_utils import add_common_other_args_and_parse
 
 character_regex = (
@@ -35,7 +36,7 @@ def call_generate_outlines(
         "n": 1,
         "stream": stream,
     }
-    res = requests.post(url, json=data)
+    res = requests.post(url, json=data, stream=stream)
     return res
 
 
@@ -55,14 +56,22 @@ def main(args):
             name
             + " is a character in Harry Potter. Please fill in the following information about him/her.\n"
         )
-        for chunk in generate(
+        res = generate(
             prompt,
             temperature=0,
             max_tokens=256,
             regex=character_regex,
             stream=True,
-        ):
-            print(chunk)
+        )
+        last_len = 0
+        for chunk in res.iter_content(chunk_size=None):
+            chunk_str = chunk.decode().strip()
+            chunk_str = chunk_str[: chunk_str.rfind("}") + 1]
+            chunk_json = json.loads(chunk_str)
+            out = chunk_json["text"][0][last_len:]
+            last_len = len(chunk_json["text"][0])
+            print(out, end="", flush=True)
+        print()
 
     latency = time.time() - tic
 

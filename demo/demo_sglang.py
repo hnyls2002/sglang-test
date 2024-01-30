@@ -52,7 +52,7 @@ def main(args):
             stream=True,
         )
         for out in state.text_iter():
-            print(out, end="")
+            print(out, end="", flush=True)
         print()
 
     latency = time.time() - tic
