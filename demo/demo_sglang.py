@@ -25,7 +25,7 @@ character_regex = (
 # fmt: off
 @sgl.function
 def character_gen(s, name):
-    s += name+ " is a character in Harry Potter.\nPlease fill in the following information about the character.\n"
+    s += name+ " is a character in Harry Potter.\nPlease fill in the following information about this character.\n"
     s += sgl.gen("json_output", max_tokens=256, regex=character_regex)
 # fmt: on
 

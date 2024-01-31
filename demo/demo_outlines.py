@@ -53,7 +53,7 @@ def main(args):
     for name in names:
         prompt = (
             name
-            + " is a character in Harry Potter.\nPlease fill in the following information about the character.\n"
+            + " is a character in Harry Potter.\nPlease fill in the following information about this character.\n"
         )
         res = generate(
             prompt,
