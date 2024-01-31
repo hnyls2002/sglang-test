@@ -4,8 +4,7 @@ import multiprocessing
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from enum import Enum, auto
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List
 
 import numpy as np
 import rpyc
@@ -17,8 +16,8 @@ from sglang.srt.constrained.fsm_cache import FSMCache
 from sglang.srt.hf_transformers_utils import get_processor, get_tokenizer
 from sglang.srt.managers.io_struct import (
     BatchTokenIDOut,
-    TokenizedGenerateReqInput,
     FlushCacheReq,
+    TokenizedGenerateReqInput,
 )
 from sglang.srt.managers.router.infer_batch import Batch, ForwardMode, Req
 from sglang.srt.managers.router.model_runner import ModelRunner
@@ -99,6 +98,7 @@ class ModelRpcServer(rpyc.Service):
 
         # Init cache
         self.tree_cache = RadixCache(disable="no-cache" in self.model_mode)
+        self.tree_cache_metrics = {"total": 0, "hit": 0}
         self.scheduler = Scheduler(
             self.schedule_heuristic,
             self.max_num_running_seq,
@@ -136,6 +136,8 @@ class ModelRpcServer(rpyc.Service):
             self.running_batch is None or len(self.running_batch.reqs) == 0
         ):
             self.tree_cache.reset()
+            self.tree_cache_metrics = {"total": 0, "hit": 0}
+            self.regex_fsm_cache.reset()
             self.req_to_token_pool.clear()
             self.token_to_kv_pool.clear()
             torch.cuda.empty_cache()
@@ -194,6 +196,9 @@ class ModelRpcServer(rpyc.Service):
                     if self.running_batch.is_empty():
                         self.running_batch = None
                         break
+
+                    if self.out_pyobjs and self.running_batch.reqs[0].stream:
+                        break
             else:
                 # check the available size
                 available_size = (
@@ -208,8 +213,7 @@ class ModelRpcServer(rpyc.Service):
                     )
 
         if self.running_batch is not None and self.tp_rank == 0:
-            if self.decode_forward_ct >= 20:
-                self.decode_forward_ct = 0
+            if self.decode_forward_ct % 20 == 0:
                 num_used = self.max_total_num_token - (
                     self.token_to_kv_pool.available_size()
                     + self.tree_cache.evictable_size()
@@ -225,11 +229,8 @@ class ModelRpcServer(rpyc.Service):
         self,
         recv_req: TokenizedGenerateReqInput,
     ):
-        req = Req(recv_req.rid)
-        req.input_text = recv_req.input_text
-        req.input_ids = recv_req.input_ids
+        req = Req(recv_req.rid, recv_req.input_text, recv_req.input_ids)
         req.pixel_values = recv_req.pixel_values
-        req.image_size = recv_req.image_size
         if req.pixel_values is not None:
             pad_value = [
                 (recv_req.image_hash) % self.model_config.vocab_size,
@@ -240,6 +241,7 @@ class ModelRpcServer(rpyc.Service):
             req.input_ids, req.image_offset = self.model_runner.model.pad_input_ids(
                 req.input_ids, pad_value, req.pixel_values.shape, req.image_size
             )
+            req.image_size = recv_req.image_size
         req.sampling_params = recv_req.sampling_params
         req.return_logprob = recv_req.return_logprob
         req.logprob_start_len = recv_req.logprob_start_len
@@ -248,9 +250,9 @@ class ModelRpcServer(rpyc.Service):
 
         # Init regex fsm
         if req.sampling_params.regex is not None:
-            req.regex_fsm = self.regex_fsm_cache.init_fsm(req.sampling_params.regex)
+            req.regex_fsm = self.regex_fsm_cache.query(req.sampling_params.regex)
             if not self.no_regex_fast_forward:
-                req.fast_forward_map = self.fast_forward_cache.init_fast_forward_map(
+                req.fast_forward_map = self.fast_forward_cache.query(
                     req.sampling_params.regex
                 )
 
@@ -285,7 +287,6 @@ class ModelRpcServer(rpyc.Service):
         can_run_list = []
         new_batch_total_tokens = 0
         new_batch_input_tokens = 0
-        new_batch_prefix_tokens = 0
 
         available_size = (
             self.token_to_kv_pool.available_size() + self.tree_cache.evictable_size()
@@ -327,9 +328,11 @@ class ModelRpcServer(rpyc.Service):
                     req.extend_input_len + req.max_new_tokens() + new_batch_total_tokens
                     < available_size
                 ):
+                    # Undo the insertion
                     delta = self.tree_cache.dec_ref_counter(req.last_node)
                     available_size += delta
                 else:
+                    # Add this request to the running batch
                     self.token_to_kv_pool.add_refs(req.prefix_indices)
                     can_run_list.append(req)
                     new_batch_total_tokens += (
@@ -341,12 +344,30 @@ class ModelRpcServer(rpyc.Service):
             return None
 
         if self.tp_rank == 0:
+            running_req = (
+                0 if self.running_batch is None else len(self.running_batch.reqs)
+            )
+            hit_tokens = sum(len(x.prefix_indices) for x in can_run_list)
+            self.tree_cache_metrics["total"] += (
+                hit_tokens + new_batch_input_tokens
+            ) / 10**9
+            self.tree_cache_metrics["hit"] += hit_tokens / 10**9
+            tree_cache_hit_rate = (
+                self.tree_cache_metrics["hit"] / self.tree_cache_metrics["total"]
+            )
             logger.info(
                 f"new fill batch. #seq: {len(can_run_list)}. "
-                f"#cached_token: {sum(len(x.prefix_indices) for x in can_run_list)}. "
+                f"#cached_token: {hit_tokens}. "
                 f"#new_token: {new_batch_input_tokens}. "
                 f"#remaining_req: {len(self.forward_queue) - len(can_run_list)}. "
-                f"#running_req: {0 if self.running_batch is None else len(self.running_batch.reqs)}"
+                f"#running_req: {running_req}. "
+                f"tree_cache_hit_rate: {100.0 * tree_cache_hit_rate:.2f}%."
+            )
+            logger.debug(
+                f"fsm_cache_hit_rate: {100.0 * self.regex_fsm_cache.get_cache_hit_rate():.2f}%. "
+                f"fsm_cache_avg_init_time: {self.regex_fsm_cache.get_avg_init_time():.2f}s. "
+                f"ff_cache_hit_rate: {100.0 * self.fast_forward_cache.get_cache_hit_rate():.2f}%. "
+                f"ff_cache_avg_init_time: {self.fast_forward_cache.get_avg_init_time():.2f}s. "
             )
 
         new_batch = Batch.init_new(
@@ -421,7 +442,7 @@ class ModelRpcServer(rpyc.Service):
                 return
 
         # Update batch tensors
-        self.decode_forward_ct += 1
+        self.decode_forward_ct = (self.decode_forward_ct + 1) % (1 << 30)
         batch.prepare_for_decode()
 
         # Forward
@@ -454,7 +475,13 @@ class ModelRpcServer(rpyc.Service):
                 unfinished_indices.append(i)
 
             if req.finished or (
-                req.stream and self.decode_forward_ct % self.stream_interval == 0
+                (
+                    req.stream
+                    and (
+                        self.decode_forward_ct % self.stream_interval == 0
+                        or len(req.output_ids) == 1
+                    )
+                )
             ):
                 output_rids.append(req.rid)
                 output_tokens.append(req.output_ids)
@@ -561,7 +588,7 @@ def start_model_process(port):
         t = ThreadedServer(
             ModelRpcServer(),
             port=port,
-            protocol_config={"allow_pickle": True, "sync_request_timeout": 600},
+            protocol_config={"allow_pickle": True, "sync_request_timeout": 1800},
         )
         t.start()
 
@@ -575,7 +602,7 @@ def start_model_process(port):
             con = rpyc.connect(
                 "localhost",
                 port,
-                config={"allow_pickle": True, "sync_request_timeout": 600},
+                config={"allow_pickle": True, "sync_request_timeout": 1800},
             )
             break
         except ConnectionRefusedError:
