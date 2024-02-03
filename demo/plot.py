@@ -9,24 +9,34 @@ def show_name(name):
     convert = {
         # backend
         "srt": "SGLang",
-        "vllm": "Outline + vLLM",
+        "vllm": "Outlines + vLLM",
         "guidance": "Guidance + llama.cpp",
-        "srt_no_fst_fwd": "SGLang (No Jump Forward)",
+        "srt_no_fst_fwd": "SGLang (No Jump-Forward)",
         # bench_mode
         "character": "Character Generation",
-        "city": "Long Document\nRetriever",
-        "character_bs1": "Character Generation\n(bs = 1)",
-        "city_bs1": "Long Document\nRetriever (bs = 1)",
+        "city": "Long Document Retrieval",
+        "character_bs1": "Character Generation\n(batch size = 1)",
+        "city_bs1": "Long Document Retrieval\n(batch size = 1)",
     }
     return convert.get(name, name)
+
+
+def get_hatch(backend):
+    convert = {
+        "srt": "",
+        "srt_no_fst_fwd": "*",
+        "vllm": "",
+        "guidance": "",
+    }
+    return convert.get(backend, "")
 
 
 def get_color(backend):
     convert = {
         "srt": "C0",
-        "srt_no_fst_fwd": "C1",
-        "vllm": "C2",
-        "guidance": "C3",
+        "srt_no_fst_fwd": "lightblue",
+        "vllm": "C1",
+        "guidance": "C2",
     }
     return convert.get(backend, "k")
 
@@ -57,6 +67,7 @@ def plot_group_bar_chart(
             g,
             width,
             label=show_name(methods[i]),
+            # hatch=get_hatch(methods[i]),
             color=get_color(methods[i]),
         )
 
@@ -71,10 +82,10 @@ def plot_group_bar_chart(
     for tick in ax.yaxis.get_major_ticks():
         tick.label1.set_fontsize(15)
     ax.legend(
-        handlelength=1,
+        handlelength=0.7,
         ncols=4,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.3),
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.45),
         fontsize=13,
     )
     ax.grid(True, which="both", linestyle="--", linewidth=0.5)
@@ -126,7 +137,7 @@ def main():
         y_label="Normalized Throughput",
         baseline="srt",
     )
-    plt.subplots_adjust(left=0.1, right=0.9, top=0.8, bottom=0.3)
+    plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.3)
 
     fig.savefig("result.png")
 
