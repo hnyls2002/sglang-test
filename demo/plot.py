@@ -24,10 +24,10 @@ def show_name(name):
 
 def get_color(backend):
     convert = {
-        "srt": "C0",
-        "srt_no_fst_fwd": "lightblue",
-        "vllm": "C1",
-        "guidance": "C2",
+        "srt": "orange",
+        "srt_no_fst_fwd": "lightcoral",
+        "vllm": "lightgreen",
+        "guidance": "lightblue",
     }
     return convert.get(backend, "k")
 
@@ -91,48 +91,48 @@ def main():
             print(bm, backend, data[bm][backend])
 
     # get one figure
-    fig, axs = plt.subplots(1, 4, figsize=(16, 4))
+    fig, axs = plt.subplots(2, 2, figsize=(10, 9))
     plot_one_chat(
-        axs[0],
+        axs[0][0],
         ["srt", "srt_no_fst_fwd", "vllm", "guidance"],
         data["character"],
         "Character Generation",
         y_lable="Throughput (Req / s)",
     )
     plot_one_chat(
-        axs[1],
+        axs[0][1],
         ["srt", "srt_no_fst_fwd", "vllm", "guidance"],
         data["city"],
         "Long Document Retrieval",
         y_lable="Throughput (Req / s)",
     )
     plot_one_chat(
-        axs[2],
+        axs[1][0],
         ["srt", "srt_no_fst_fwd", "vllm", "guidance"],
         data["character_bs1"],
         "Character Generation\n(Batch Size = 1)",
         y_lable="Latency (s / Req)",
     )
     plot_one_chat(
-        axs[3],
+        axs[1][1],
         ["srt", "srt_no_fst_fwd", "vllm", "guidance"],
         data["city_bs1"],
         "Long Document Retrieval\n(Batch Size = 1)",
         y_lable="Latency (s / Req)",
     )
 
-    plt.subplots_adjust(wspace=0.4, bottom=0.2)
-    handles, labels = axs[0].get_legend_handles_labels()
+    plt.subplots_adjust(wspace=0.3, hspace=0.25, bottom=0.12)
+    handles, labels = axs[0][0].get_legend_handles_labels()
     fig.legend(
         handles,
         labels,
         loc="lower center",
-        ncol=4,
+        ncol=2,
         bbox_to_anchor=(0.5, 0),
         fontsize=16,
     )
 
-    fig.savefig("result.png")
+    fig.savefig("result.png", bbox_inches="tight")
 
 
 if __name__ == "__main__":
